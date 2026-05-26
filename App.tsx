@@ -37,7 +37,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations, languageList, LanguageCode } from './translations';
-import { RegistrationForm } from './components/RegistrationForm';
+import { RegistrationForm } from './RegistrationForm';
 import { AdminPanel } from './components/AdminPanel';
 import { EditorPanel } from './components/EditorPanel';
 import { BottomNav } from './components/BottomNav';
