@@ -139,7 +139,20 @@ const db = {
     }
   ],
   support_messages: [],
-  global_videos: [] as { id: number; video_url: string; channel_url: string; created_at: string }[],
+  global_videos: [
+    {
+      id: 1,
+      video_url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      channel_url: 'https://www.youtube.com',
+      created_at: new Date().toISOString()
+    },
+    {
+      id: 2,
+      video_url: 'https://www.youtube.com/watch?v=Q3vSWhEubX4',
+      channel_url: 'https://www.youtube.com',
+      created_at: new Date().toISOString()
+    }
+  ] as { id: number; video_url: string; channel_url: string; created_at: string }[],
   music_config: { source_type: 'file', source_url: '', play_mode: 'loop' } as { source_type: 'file' | 'link'; source_url: string; play_mode: 'loop' | 'once' },
   account_access_codes: [] as { id: number; account_type: string; access_code: string; created_at: string }[],
   video_music_control: [] as { id: number; item_type: 'video' | 'music_file', file_path_or_url: string, play_mode: 'loop' | 'once', created_at: string }[]
@@ -500,6 +513,78 @@ app.post('/api/autopilot/toggle', (req, res) => {
     const { enabled } = req.body;
     isAutopilotEnabled = !!enabled;
     res.json({ success: true, enabled: isAutopilotEnabled });
+});
+
+// AI Conversational Chat / Voice response
+app.post('/api/autopilot/chat', async (req, res) => {
+    if (!isAutopilotEnabled) {
+        return res.status(400).json({ error: "অটো-পাইলট সিস্টেম বর্তমানে নিষ্ক্রিয়।" });
+    }
+    const { message } = req.body;
+    if (!message) {
+        return res.status(400).json({ error: "কোনো বার্তা পাওয়া যায়নি।" });
+    }
+
+    try {
+        const ai = getGeminiAI();
+        const prompt = `You are Srabonti (শ্রাবন্তী), a beautiful, sweet, soft-spoken, and romantic female AI voice assistant inside the Gemini 3.5 Autopilot.
+The user said to you: "${message}".
+
+Generate a very short, extremely polite, sweet, romantic and warm response in beautiful fluent Bengali (strictly max 1 to 2 short sentences total).
+Your reply should sound like a caring, comforting, and helpful companion. Keep it conversational. Address the user with respect or warm terms. Do not use complex technical terms unless requested. Never output code blocks, JSON, or formatting guides. Just give the raw plain text Bengali reply.`;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-3.5-flash',
+            contents: prompt,
+            config: {
+                systemInstruction: "You are Srabonti, a sweet-voiced Bengali female assistant. Keep responses strictly brief, helpful, and sweet (1-2 lines in plain Bengali text only)."
+            }
+        });
+
+        const reply = response.text ? response.text.trim() : "আমি আপনাকে শুনছি। বলুন কীভাবে সাহায্য করতে পারি?";
+        res.json({ success: true, reply });
+    } catch (error: any) {
+        console.error('Autopilot Chat Error:', error);
+        res.status(500).json({ error: "দুঃখিত প্রিয়, কোনো সমস্যা হয়েছে।" });
+    }
+});
+
+// Gemini Text-to-Speech (TTS) Proxy Endpoint
+app.post('/api/autopilot/tts', async (req, res) => {
+    const { text, voice } = req.body;
+    if (!text) {
+        return res.status(400).json({ error: "অনুবাদ করার জন্য কোনো টেক্সট দেওয়া হয়নি।" });
+    }
+
+    try {
+        const ai = getGeminiAI();
+        // Dynamically choose selected prebuilt voice (Kore, Puck, Zephyr, Fenrir, Charon)
+        const voiceName = voice || 'Kore';
+
+        const response = await ai.models.generateContent({
+            model: "gemini-3.1-flash-tts-preview",
+            contents: [{ parts: [{ text: text }] }],
+            config: {
+                responseModalities: ["AUDIO"],
+                speechConfig: {
+                    voiceConfig: {
+                        prebuiltVoiceConfig: { voiceName: voiceName },
+                    },
+                },
+            },
+        });
+
+        const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        if (base64Audio) {
+            res.json({ success: true, audio: base64Audio });
+        } else {
+            console.error("Gemini TTS candidate empty direct reply:", JSON.stringify(response));
+            res.status(500).json({ error: "জেমিনি ভয়েস তৈরি করতে ব্যর্থ হয়েছে।" });
+        }
+    } catch (error: any) {
+        console.error('Gemini TTS Proxy Error:', error);
+        res.status(500).json({ error: "ভয়েস জেনারেশনে সমস্যা হয়েছে: " + error.message });
+    }
 });
 
 // AI Diagnosis Endpoint

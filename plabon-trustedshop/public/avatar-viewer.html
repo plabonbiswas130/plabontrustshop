@@ -35,6 +35,17 @@
         .box-glow {
             box-shadow: 0 0 20px rgba(59, 130, 246, 0.15);
         }
+        /* Automatically collapse sidebars/controls on small frames/floating boxes to keep avatar visible */
+        @media (max-width: 1024px) {
+            .optional-panel {
+                display: none !important;
+            }
+        }
+        @media (max-height: 520px) {
+            .optional-panel {
+                display: none !important;
+            }
+        }
     </style>
     <!-- Font Import -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;850&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet font-sans">
@@ -83,7 +94,7 @@
     </div>
 
     <!-- LEFT SIDEBAR: CONFIGURATIONS & INTERFACE -->
-    <div class="absolute top-20 left-4 bottom-4 w-80 md:w-96 bg-slate-950/85 backdrop-blur-lg border border-slate-800 rounded-2xl flex flex-col justify-between p-4 shadow-2xl overflow-y-auto space-y-4 z-10 z-index-10 shrink-0">
+    <div id="left-sidebar" class="optional-panel absolute top-20 left-4 bottom-4 w-80 md:w-96 bg-slate-950/85 backdrop-blur-lg border border-slate-800 rounded-2xl flex flex-col justify-between p-4 shadow-2xl overflow-y-auto space-y-4 z-10 z-index-10 shrink-0">
         
         <div class="space-y-4">
             <!-- Header Section -->
@@ -175,7 +186,7 @@
     </div>
 
     <!-- RIGHT SIDE PANEL: CONTROLS & UTILITIES -->
-    <div class="absolute top-20 right-4 bottom-4 w-72 bg-slate-950/85 backdrop-blur-lg border border-slate-800 rounded-2xl flex flex-col justify-between p-4 shadow-2xl overflow-y-auto space-y-4 z-10">
+    <div id="right-sidebar" class="optional-panel absolute top-20 right-4 bottom-4 w-72 bg-slate-950/85 backdrop-blur-lg border border-slate-800 rounded-2xl flex flex-col justify-between p-4 shadow-2xl overflow-y-auto space-y-4 z-10">
         <div class="space-y-4">
             
             <div class="border-b border-slate-850 pb-2 flex items-center justify-between">
@@ -270,7 +281,7 @@
     </div>
 
     <!-- FLOATING CENTRAL-BOTTOM AUDIO/PLAYBACK CONTROL BAR -->
-    <div class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-950/90 border border-slate-800 rounded-2xl flex flex-col p-4 w-[90%] sm:w-[500px] box-glow shadow-2xl z-15 select-none z-10">
+    <div id="bottom-bar" class="optional-panel absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-950/90 border border-slate-800 rounded-2xl flex flex-col p-4 w-[90%] sm:w-[500px] box-glow shadow-2xl z-15 select-none z-10">
         
         <!-- Dropdown of active tracks -->
         <div class="flex items-center gap-3 w-full pb-3 border-b border-slate-850 flex-wrap sm:flex-nowrap">
@@ -316,8 +327,33 @@
         </div>
     </div>
 
+    <!-- FLOATING CONTROLS TOGGLE FOR MOBILE/EMBED MODES -->
+    <button onclick="toggleAllPanels()" class="absolute bottom-4 right-4 z-[999] bg-slate-950/95 hover:bg-slate-900 border border-slate-800 text-white p-2.5 rounded-full shadow-xl flex items-center justify-center gap-1.5 cursor-pointer pointer-events-auto text-xs font-bold transition">
+        <i data-lucide="settings" class="w-4 h-4 text-emerald-400 animate-spin" style="animation-duration: 8s;"></i>
+        <span class="text-[10px] tracking-widest uppercase font-black">মেগা প্যানেল</span>
+    </button>
+
     <!-- CORE THREE.JS LOGIC -->
     <script type="module">
+        // Global toggle panel function for mobile/embed environments
+        window.toggleAllPanels = function() {
+            const left = document.getElementById('left-sidebar');
+            const right = document.getElementById('right-sidebar');
+            const bottom = document.getElementById('bottom-bar');
+            if (left && right && bottom) {
+                const isHidden = left.style.display === 'none' || window.getComputedStyle(left).display === 'none';
+                if (isHidden) {
+                    left.style.setProperty('display', 'flex', 'important');
+                    right.style.setProperty('display', 'flex', 'important');
+                    bottom.style.setProperty('display', 'flex', 'important');
+                } else {
+                    left.style.setProperty('display', 'none', 'important');
+                    right.style.setProperty('display', 'none', 'important');
+                    bottom.style.setProperty('display', 'none', 'important');
+                }
+            }
+        };
+
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -511,6 +547,8 @@
                 ['LeftKnee', 'LeftFoot'], ['RightKnee', 'RightFoot']
             ];
 
+            window.fallbackConnections = [];
+
             connections.forEach(([from, to]) => {
                 const pFrom = createdJointMeshes[from].position;
                 const pTo = createdJointMeshes[to].position;
@@ -526,6 +564,13 @@
                 cylinder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
                 cylinder.castShadow = true;
                 avatarGroup.add(cylinder);
+
+                window.fallbackConnections.push({
+                    from,
+                    to,
+                    cylinder,
+                    initialDistance: distance
+                });
             });
 
             // Add subtle chest hologram ring
@@ -576,9 +621,30 @@
                         }
                     });
 
-                    // Set standard human scale
-                    activeAvatarMesh.scale.setScalar(currentTargetScale);
-                    activeAvatarMesh.position.y = currentTargetPosY;
+                    // Auto fit, center and normalize any custom/Internet downloaded model
+                    const box = new THREE.Box3().setFromObject(activeAvatarMesh);
+                    const size = box.getSize(new THREE.Vector3());
+                    const center = box.getCenter(new THREE.Vector3());
+                    
+                    const desiredHeight = 1.75; // average human height
+                    if (size.y > 0) {
+                        const calculatedScale = desiredHeight / size.y;
+                        currentTargetScale = calculatedScale;
+                        activeAvatarMesh.scale.setScalar(currentTargetScale);
+                        
+                        // Floor positioning (feet on the grid floor)
+                        currentTargetPosY = -box.min.y * currentTargetScale;
+                        activeAvatarMesh.position.y = currentTargetPosY;
+                        
+                        // Horizontal center
+                        activeAvatarMesh.position.x = -center.x * currentTargetScale;
+                        activeAvatarMesh.position.z = -center.z * currentTargetScale;
+                    } else {
+                        // Fallback static
+                        activeAvatarMesh.scale.setScalar(currentTargetScale);
+                        activeAvatarMesh.position.y = currentTargetPosY;
+                    }
+                    
                     scene.add(activeAvatarMesh);
 
                     // Initialize the AnimationMixer bound directly on this loaded model
@@ -1109,24 +1175,123 @@
                 mixer.update(delta);
             }
 
-            // 2. Procedural Idle Breath simulated if model is dummy
-            if (activeAvatarMesh && activeAvatarMesh.name === 'Procedural_Cyber_Avatar') {
+            // 2. Procedural Idle Breath, Position & Action Modifiers
+            if (activeAvatarMesh) {
                 const elapsed = clock.getElapsedTime();
-                // Subtly breathing effect
+                const pose = window.currentPose || 'stand';
+
+                // Let's locate critical target nodes
                 const hips = activeAvatarMesh.getObjectByName('Hips');
                 const head = activeAvatarMesh.getObjectByName('Head');
                 const spine = activeAvatarMesh.getObjectByName('Spine');
+                
+                const leftKnee = activeAvatarMesh.getObjectByName('LeftKnee');
+                const rightKnee = activeAvatarMesh.getObjectByName('RightKnee');
+                const leftFoot = activeAvatarMesh.getObjectByName('LeftFoot');
+                const rightFoot = activeAvatarMesh.getObjectByName('RightFoot');
 
-                if (hips) {
-                    hips.position.y = 0.9 + Math.sin(elapsed * 2) * 0.015;
+                const isProcedural = (activeAvatarMesh.name === 'Procedural_Cyber_Avatar');
+
+                if (pose === 'sit') {
+                    // Sit behavior: Lower overall vertical offsets
+                    activeAvatarMesh.position.y = currentTargetPosY - 0.55;
+                    
+                    if (isProcedural) {
+                        // Position procedural hip lower
+                        if (hips) hips.position.set(0, 0.45, 0);
+                        // Bend legs at the knees forwards and up
+                        if (leftKnee && rightKnee) {
+                            leftKnee.position.set(-0.15, 0.45, 0.4);
+                            rightKnee.position.set(0.15, 0.45, 0.4);
+                        }
+                        if (leftFoot && rightFoot) {
+                            leftFoot.position.set(-0.17, 0.05, 0.35);
+                            rightFoot.position.set(0.17, 0.05, 0.35);
+                        }
+                    }
+                } else if (pose === 'walk') {
+                    // Walk behavior: sway back and forth & up and down
+                    activeAvatarMesh.position.y = currentTargetPosY + Math.sin(elapsed * 4.5) * 0.05;
+                    activeAvatarMesh.position.x = Math.sin(elapsed * 1.5) * 0.25;
+                    
+                    if (isProcedural) {
+                        if (hips) hips.position.set(0, 0.9 + Math.sin(elapsed * 4.5) * 0.02, 0);
+                        // Alternate knees back and forth simulating footsteps
+                        if (leftKnee && rightKnee) {
+                            leftKnee.position.set(-0.15, 0.5, Math.sin(elapsed * 4.5) * 0.25);
+                            rightKnee.position.set(0.15, 0.5, -Math.sin(elapsed * 4.5) * 0.25);
+                        }
+                        if (leftFoot && rightFoot) {
+                            leftFoot.position.set(-0.17, 0.05 + Math.max(0, Math.sin(elapsed * 4.5)) * 0.08, Math.sin(elapsed * 4.5) * 0.2);
+                            rightFoot.position.set(0.17, 0.05 + Math.max(0, -Math.sin(elapsed * 4.5)) * 0.08, -Math.sin(elapsed * 4.5) * 0.2);
+                        }
+                    }
+                } else if (pose === 'hover') {
+                    // Hover behavior: float gracefully in the air in sine waves
+                    activeAvatarMesh.position.y = currentTargetPosY + 0.35 + Math.sin(elapsed * 2.5) * 0.15;
+                    activeAvatarMesh.position.x = 0;
+                    
+                    if (isProcedural) {
+                        if (hips) hips.position.set(0, 0.9, 0);
+                        // Legs float back softly
+                        if (leftKnee && rightKnee) {
+                            leftKnee.position.set(-0.12, 0.4, -0.1);
+                            rightKnee.position.set(0.12, 0.4, -0.1);
+                        }
+                        if (leftFoot && rightFoot) {
+                            leftFoot.position.set(-0.14, 0.0, -0.2);
+                            rightFoot.position.set(0.14, 0.0, -0.2);
+                        }
+                    }
+                } else {
+                    // Stand (Standard Idle breathing)
+                    activeAvatarMesh.position.y = currentTargetPosY;
+                    activeAvatarMesh.position.x = 0;
+                    
+                    if (isProcedural) {
+                        if (hips) hips.position.set(0, 0.9 + Math.sin(elapsed * 2) * 0.012, 0);
+                        if (leftKnee && rightKnee) {
+                            leftKnee.position.set(-0.15, 0.5, 0);
+                            rightKnee.position.set(0.15, 0.5, 0);
+                        }
+                        if (leftFoot && rightFoot) {
+                            leftFoot.position.set(-0.17, 0.05, 0);
+                            rightFoot.position.set(0.17, 0.05, 0);
+                        }
+                    }
                 }
+
+                // Apply simple subtle random head look-around breathing to make it feel human
                 if (head) {
-                    head.position.y = 1.6 + Math.sin(elapsed * 2 + 0.5) * 0.008;
-                    head.rotation.y = Math.sin(elapsed * 1) * 0.04;
+                    head.position.y = (isProcedural ? 1.6 : head.position.y) + Math.sin(elapsed * 2 + 0.5) * 0.005;
+                    // Look around slightly
+                    if (!window.isSpeakingActive) {
+                        head.rotation.y = Math.sin(elapsed * 0.8) * 0.05;
+                    }
                 }
                 if (spine) {
-                    spine.rotation.z = Math.sin(elapsed * 1.5) * 0.02;
+                    spine.rotation.z = Math.sin(elapsed * 1.2) * 0.015;
                 }
+            }
+
+            // Update procedural skeleton limb geometries dynamically to match moved joint positions
+            if (activeAvatarMesh && activeAvatarMesh.name === 'Procedural_Cyber_Avatar' && window.fallbackConnections) {
+                window.fallbackConnections.forEach((conn) => {
+                    const fromNode = activeAvatarMesh.getObjectByName(conn.from);
+                    const toNode = activeAvatarMesh.getObjectByName(conn.to);
+                    if (fromNode && toNode) {
+                        const pFrom = fromNode.position;
+                        const pTo = toNode.position;
+
+                        const direction = new THREE.Vector3().subVectors(pTo, pFrom);
+                        const distance = pFrom.distanceTo(pTo);
+                        
+                        // Stretch/rotate cylinder cylinder
+                        conn.cylinder.scale.set(1, distance / conn.initialDistance, 1);
+                        conn.cylinder.position.copy(pFrom).addScaledVector(direction, 0.5);
+                        conn.cylinder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
+                    }
+                });
             }
 
             // 3. Orbit camera updates
@@ -1155,6 +1320,73 @@
             setTimeout(() => {
                 window.loadAvatarGLB('avatar.glb');
             }, 500);
+        });
+
+        // Listen to messages from the parent React app for dynamic 3D sync
+        window.addEventListener('message', (event) => {
+            if (!event.data) return;
+            const data = event.data;
+            if (data.type === 'loadModel') {
+                const url = data.url;
+                if (url) {
+                    window.loadAvatarGLB(url);
+                }
+            } else if (data.type === 'playPose') {
+                const pose = data.pose;
+                if (pose) {
+                    window.currentPose = pose;
+                }
+            } else if (data.type === 'playMotion') {
+                const motion = data.motion;
+                if (motion) {
+                    // Update dropdown value and play
+                    const dropdown = document.getElementById('animation-dropdown');
+                    if (dropdown) {
+                        // dynamically add as temporary option if not present
+                        let found = false;
+                        for (let i = 0; i < dropdown.options.length; i++) {
+                            if (dropdown.options[i].value === motion) {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found && motion) {
+                            const opt = document.createElement('option');
+                            opt.value = motion;
+                            opt.textContent = motion;
+                            dropdown.appendChild(opt);
+                        }
+                        dropdown.value = motion;
+                        
+                        // Handle load if there is some remote/temporary source path
+                        if (motion.endsWith('.fbx') || motion.endsWith('.glb')) {
+                            window.loadFutureAnimations([motion]);
+                        } else {
+                            window.playSelectedAnimation();
+                        }
+                    }
+                }
+            } else if (data.type === 'speak') {
+                // If we want the avatar to subtly move its head/jaw while speaking
+                if (activeAvatarMesh) {
+                    const head = activeAvatarMesh.getObjectByName('Head') || activeAvatarMesh.getObjectByName('mixamorigHead');
+                    if (head) {
+                        // Subtly animate the head to look alive while speaking Bengali
+                        let count = 0;
+                        window.isSpeakingActive = true;
+                        const interval = setInterval(() => {
+                            if (count > 40) {
+                                clearInterval(interval);
+                                window.isSpeakingActive = false;
+                            } else {
+                                head.rotation.x = (Math.sin(count * 0.4) * 0.04) + 0.02;
+                                head.rotation.y = Math.cos(count * 0.2) * 0.04;
+                                count++;
+                            }
+                        }, 80);
+                    }
+                }
+            }
         });
 
     </script>

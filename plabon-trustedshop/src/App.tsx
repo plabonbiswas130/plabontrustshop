@@ -33,7 +33,8 @@ import {
   VolumeX,
   Mic,
   Disc,
-  LayoutGrid
+  LayoutGrid,
+  CreditCard
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations, languageList, LanguageCode } from './translations';
@@ -48,6 +49,7 @@ import { AccountAccess } from './components/AccountAccess';
 import { AccountVerification } from './components/AccountVerification';
 import { EcommerceDashboard } from './components/EcommerceDashboard';
 import { MaintenanceScreen } from './components/MaintenanceScreen';
+import { SubscriptionCheckout } from './components/SubscriptionCheckout';
 
 export default function App() {
   const [isSignUpActive, setIsSignUpActive] = useState(false);
@@ -78,6 +80,13 @@ export default function App() {
   useEffect(() => {
     fetchMusicConfig();
   }, []);
+
+  // Fetch updated music configuration whenever the user returns home (main view) to capture newly uploaded files instant
+  useEffect(() => {
+    if (currentView === 'main') {
+      fetchMusicConfig();
+    }
+  }, [currentView]);
 
   // Listen for global website online status changes
   useEffect(() => {
@@ -545,6 +554,9 @@ export default function App() {
                       <button onClick={() => { setCurrentView('profile'); setIsSettingsOpen(false); }}>
                         <User size={18} /> {t.myProfile}
                       </button>
+                      <button onClick={() => { setCurrentView('checkout'); setIsSettingsOpen(false); }} className="text-pink-600 bg-pink-50/55 hover:bg-pink-100 font-bold">
+                        <CreditCard size={18} className="text-pink-600 animate-pulse animate-duration-1000" /> Reopen Store / Premium Pay
+                      </button>
                       <button onClick={() => { setCurrentView('dropshipping'); setIsSettingsOpen(false); }}>
                         <Truck size={18} /> {t.dropShippingAccount}
                       </button>
@@ -574,6 +586,8 @@ export default function App() {
             <ProfileDashboard t={t} />
           ) : currentView === 'videos' ? (
             <VideoGallery />
+          ) : currentView === 'checkout' ? (
+            <SubscriptionCheckout onBack={() => setCurrentView('main')} />
           ) : currentView === 'dropshipping' || currentView === 'warehouse' ? (
             <RegistrationForm 
               t={t} 
@@ -860,15 +874,35 @@ function GlobalMusicLoader({ config, isMuted, audioRef, ytPlayerRef }: any) {
     }
   }, [config, isMuted, audioRef]);
 
-  // Update src when index changes
+  // Update src when index changes without resetting the actual media resource unnecessarily
   useEffect(() => {
     if (config?.source_type === 'file' && config.files && config.files[currentIndex] && audioRef.current) {
-        audioRef.current.src = config.files[currentIndex];
+        const nextSrc = config.files[currentIndex];
+        const currentSrc = audioRef.current.getAttribute('src') || '';
+        
+        // Prevent reloading the audio if it is already set to the same source
+        if (currentSrc !== nextSrc && !currentSrc.endsWith(nextSrc)) {
+            audioRef.current.src = nextSrc;
+        }
+
         if (!isMuted) {
             audioRef.current.play().catch((e: any) => console.log("Autoplay blocked", e));
+        } else {
+            audioRef.current.pause();
         }
     }
   }, [currentIndex, config, isMuted, audioRef]);
+
+  // Handle playing single file legacy support
+  useEffect(() => {
+    if (config?.source_type === 'file' && (!config.files || config.files.length === 0) && audioRef.current) {
+      if (!isMuted) {
+        audioRef.current.play().catch((e: any) => console.log("Autoplay blocked", e));
+      } else {
+        audioRef.current.pause();
+      }
+    }
+  }, [isMuted, config, audioRef]);
 
   const extractYTId = (url: string) => {
     const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
