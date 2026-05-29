@@ -6,3 +6,5 @@ coverage/
 *.log
 .env*
 !.env.example
+$RECYCLE.BIN/
+1234567890/
